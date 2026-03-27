@@ -1,0 +1,1 @@
+{"name":"orders-bs","version":"1.0.0","main":"orders-bs.js","scripts":{"start":"node orders-bs.js"},"dependencies":{"mssql":"^10.0.4"}}
