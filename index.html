@@ -311,9 +311,9 @@ select{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/
     </div>
     <div class="form-group">
       <label class="form-label">Shopify Connection</label>
-      <input type="text" id="shopify-domain" placeholder="yourstore.myshopify.com" style="margin-bottom:8px">
+      <input type="text" id="shopify-domain" placeholder="cchairandbeauty.myshopify.com" style="margin-bottom:8px">
       <input type="text" id="shopify-token" placeholder="Storefront Access Token">
-      <div style="font-size:11px;color:var(--muted);margin-top:6px">Shopify Admin → Settings → Apps → Develop Apps → Create app → enable Storefront API reads → copy Storefront access token (NOT Admin API key)</div>
+      <div style="font-size:11px;color:var(--muted);margin-top:6px">To get your token: Shopify Admin → Apps → Beauty Star Orders app → API credentials → Install app → copy Storefront API access token</div>
       <button class="btn btn-secondary btn-sm" style="margin-top:8px" onclick="saveShopifySettings();testShopify()">Save & Test Shopify</button>
     </div>
     <div class="form-group">
@@ -3004,26 +3004,42 @@ function saveShopifySettings() {
 }
 
 async function testShopify() {
-  if (!SHOPIFY.domain || !SHOPIFY.token) { toast('Enter domain and token first', 'error'); return; }
+  saveShopifySettings();
+  if (!SHOPIFY.token) { toast('Enter your Storefront Access Token first', 'error'); return; }
+  toast('Testing Shopify…', 'info');
   try {
     const r = await fetchShopify(`{ shop { name } }`);
-    if (r?.data?.shop?.name) toast(`Connected: ${r.data.shop.name}`, 'success');
-    else throw new Error('No shop data');
-  } catch(e) { toast('Shopify connection failed: ' + e.message, 'error'); }
+    if (r?.data?.shop?.name) {
+      toast(`✅ Connected to: ${r.data.shop.name}`, 'success');
+      log('Shopify connected: ' + r.data.shop.name);
+    } else if (r?.errors) {
+      throw new Error(r.errors[0]?.message || 'GraphQL error');
+    } else {
+      throw new Error('Unexpected response');
+    }
+  } catch(e) {
+    toast('Shopify failed: ' + e.message, 'error');
+    log('Shopify error: ' + e.message);
+  }
 }
 
 async function fetchShopify(query, vars = {}) {
-  const domain = (SHOPIFY.domain || 'cchairandbeauty.com').replace(/^https?:\/\//, '').replace(/\/$/, '');
-  // Try with token if available, fall back to tokenless
-  const headers = { 'Content-Type': 'application/json' };
-  if (SHOPIFY.token) headers['X-Shopify-Storefront-Access-Token'] = SHOPIFY.token;
-  const res = await fetch(`https://${domain}/api/2026-01/graphql.json`, {
+  if (!SHOPIFY.token) throw new Error('No Storefront token');
+  const domain = (SHOPIFY.domain || 'cchairandbeauty.myshopify.com')
+    .replace(/^https?:\/\//, '').replace(/\/$/, '');
+  const res = await fetch(`https://${domain}/api/2024-10/graphql.json`, {
     method: 'POST',
-    headers,
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Shopify-Storefront-Access-Token': SHOPIFY.token
+    },
     body: JSON.stringify({ query, variables: vars }),
     signal: AbortSignal.timeout(10000)
   });
-  if (!res.ok) throw new Error(`Shopify ${res.status}`);
+  if (!res.ok) {
+    const txt = await res.text().catch(()=>'');
+    throw new Error(`Shopify ${res.status}: ${txt.slice(0,100)}`);
+  }
   return res.json();
 }
 
@@ -3033,26 +3049,39 @@ const shopifyImageCache = {};
 async function getShopifyImage(code, name) {
   if (shopifyImageCache[code] !== undefined) return shopifyImageCache[code];
 
-  try {
-    // Search by SKU first
-    const q1 = `{ products(first:1, query:"sku:${code}") { edges { node { featuredImage { url(transform:{maxWidth:200,maxHeight:200}) } } } } }`;
-    const d1 = await fetchShopify(q1);
-    let img = d1?.data?.products?.edges?.[0]?.node?.featuredImage?.url;
+  const domain = (SHOPIFY.domain || 'cchairandbeauty.com')
+    .replace(/^https?:\/\//, '').replace(/\/$/, '');
 
-    if (!img) {
-      // Try first 3 words of product name
-      const words = name.split(' ').slice(0,3).join(' ');
-      const q2 = `{ products(first:1, query:"title:${words}") { edges { node { featuredImage { url(transform:{maxWidth:200,maxHeight:200}) } } } } }`;
-      const d2 = await fetchShopify(q2);
-      img = d2?.data?.products?.edges?.[0]?.node?.featuredImage?.url;
-    }
-
-    shopifyImageCache[code] = img || null;
-    return img || null;
-  } catch(e) {
-    shopifyImageCache[code] = null;
-    return null;
+  // Method 1: If Storefront token available, use GraphQL
+  if (SHOPIFY.token) {
+    try {
+      const q1 = `{ products(first:1, query:"sku:${code}") { edges { node { featuredImage { url(transform:{maxWidth:200,maxHeight:200}) } } } } }`;
+      const d1 = await fetchShopify(q1);
+      let img = d1?.data?.products?.edges?.[0]?.node?.featuredImage?.url;
+      if (!img) {
+        const words = name.split(' ').slice(0,3).join(' ');
+        const q2 = `{ products(first:1, query:"title:${words}") { edges { node { featuredImage { url(transform:{maxWidth:200,maxHeight:200}) } } } } }`;
+        const d2 = await fetchShopify(q2);
+        img = d2?.data?.products?.edges?.[0]?.node?.featuredImage?.url;
+      }
+      if (img) { shopifyImageCache[code] = img; return img; }
+    } catch(e) {}
   }
+
+  // Method 2: Use public /products.json endpoint (no token needed)
+  try {
+    const words = name.split(' ').slice(0,3).join('+');
+    const url = `https://${domain}/products.json?limit=1&title=${encodeURIComponent(name.split(' ').slice(0,3).join(' '))}`;
+    const r = await fetch(url, { signal: AbortSignal.timeout(6000) });
+    if (r.ok) {
+      const data = await r.json();
+      const img = data?.products?.[0]?.images?.[0]?.src;
+      if (img) { shopifyImageCache[code] = img; return img; }
+    }
+  } catch(e) {}
+
+  shopifyImageCache[code] = null;
+  return null;
 }
 
 // ── CONFIRM ORDER PAGE ────────────────────────────────────────────────────
@@ -3404,7 +3433,7 @@ function openExcelTab() {
 async function init(){
   // Restore Shopify settings
   const sdEl=document.getElementById('shopify-domain');
-  if(sdEl)sdEl.value=SHOPIFY.domain||'cc-hair-beauty.myshopify.com';
+  if(sdEl)sdEl.value=SHOPIFY.domain||'cchairandbeauty.myshopify.com';
   const stEl=document.getElementById('shopify-token');
   if(stEl&&SHOPIFY.token)stEl.value=SHOPIFY.token;
   document.getElementById('api-url-input').value=S.apiUrl;
