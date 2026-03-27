@@ -295,7 +295,15 @@ select{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/
     <div class="modal-title">Settings</div>
     <div class="modal-subtitle">Connection and store configuration</div>
     <div id="conn-status-box" class="conn-status-box"></div>
-    <div class="form-group"><label class="form-label">Server Address</label><input type="text" id="api-url-input" placeholder="http://127.0.0.1:3001/stock"></div>
+    <div class="form-group">
+      <label class="form-label">Server Address</label>
+      <input type="text" id="api-url-input" placeholder="http://192.168.1.12:3001/stock">
+      <div style="font-size:11px;color:var(--muted);margin-top:6px;line-height:1.6">
+        <strong>Same PC:</strong> http://127.0.0.1:3001/stock<br>
+        <strong>From phone/Vercel:</strong> use your PC's network IP — run <code style="background:var(--surface2);padding:1px 5px;border-radius:3px">ipconfig</code> in Command Prompt and look for IPv4 Address (e.g. 192.168.1.45)<br>
+        Then enter: http://192.168.1.45:3001/stock
+      </div>
+    </div>
     <div class="form-group">
       <label class="form-label">Stores</label>
       <div id="settings-store-list" style="display:flex;flex-direction:column;gap:6px;margin-bottom:10px"></div>
@@ -305,7 +313,7 @@ select{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/
       <label class="form-label">Shopify Connection</label>
       <input type="text" id="shopify-domain" placeholder="yourstore.myshopify.com" style="margin-bottom:8px">
       <input type="text" id="shopify-token" placeholder="Storefront Access Token">
-      <div style="font-size:11px;color:var(--muted);margin-top:6px">Get your Storefront API token from Shopify Admin → Apps → Develop Apps</div>
+      <div style="font-size:11px;color:var(--muted);margin-top:6px">Shopify Admin → Settings → Apps → Develop Apps → Create app → enable Storefront API reads → copy Storefront access token (NOT Admin API key)</div>
       <button class="btn btn-secondary btn-sm" style="margin-top:8px" onclick="saveShopifySettings();testShopify()">Save & Test Shopify</button>
     </div>
     <div class="form-group">
@@ -376,7 +384,7 @@ select{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/
 </header>
 
 <div class="demo-banner" id="demo-banner">
-  ⚠ <strong>Demo Mode:</strong> Quantities are simulated. Run <strong>orders-bs.bat</strong> on the branch PC to connect live data.
+  ⚠ <strong>Demo Mode:</strong> Not connected to live stock. If orders-bs.bat is running, go to Settings and change the server address to your PC's network IP (e.g. <strong>http://192.168.1.X:3001/stock</strong>) — find it by running <strong>ipconfig</strong> in Command Prompt.
   <button onclick="document.getElementById('demo-banner').classList.add('hidden')" style="margin-left:auto;background:none;border:none;cursor:pointer;font-size:18px;color:var(--warn);flex-shrink:0">✕</button>
 </div>
 
@@ -2222,7 +2230,7 @@ const PRODUCT_DB = [
   {code:"BL03",name:"Skeleton Trimmer Gold (6 pcs)",brand:"BABYLISS"}
 ];
 
-const S={stores:[],activeStore:'',orderLines:[],manualStock:{},apiUrl:'http://127.0.0.1:3001/stock',activity:[],lastPdfName:null,isLive:false,connStatus:'connecting',compareData:{}};
+const S={stores:[],activeStore:'',orderLines:[],manualStock:{},apiUrl:'http://192.168.1.12:3001/stock',activity:[],lastPdfName:null,isLive:false,connStatus:'connecting',compareData:{}};
 try{const sv=JSON.parse(localStorage.getItem('bs_v4')||'{}');['stores','activeStore','manualStock','orderLines','activity','lastPdfName','apiUrl','isLive','compareData'].forEach(k=>{if(sv[k]!==undefined)S[k]=sv[k];});}catch(e){}
 function save(){try{localStorage.setItem('bs_v4',JSON.stringify(S));}catch(e){}}
 let orderFilterMode='all',orderSortMode='stock-asc',orderSearch='';
@@ -2244,13 +2252,26 @@ function setConnStatus(status,label){
 
 async function autoConnect(){
   setConnStatus('connecting','Connecting…');
-  for(const base of['http://127.0.0.1:3001','http://localhost:3001']){
+  // If user has set a custom API URL, try that first
+  const customBase = S.apiUrl.replace('/stock','');
+  const bases = [customBase, 'http://192.168.1.12:3001', 'http://127.0.0.1:3001', 'http://localhost:3001'];
+  // Dedupe
+  const toTry = [...new Set(bases)];
+  for(const base of toTry){
     try{
-      const r=await fetch(base+'/health',{signal:AbortSignal.timeout(3000)});
-      if(r.ok){S.apiUrl=base+'/stock';save();document.getElementById('api-url-input').value=S.apiUrl;setConnStatus('connected','Live');document.getElementById('demo-banner').classList.add('hidden');S.isLive=true;log('Connected to live system');await autoLoadStores();return true;}
+      const r=await fetch(base+'/health',{signal:AbortSignal.timeout(4000)});
+      if(r.ok){
+        S.apiUrl=base+'/stock';save();
+        const el=document.getElementById('api-url-input');if(el)el.value=S.apiUrl;
+        setConnStatus('connected','Live');
+        document.getElementById('demo-banner').classList.add('hidden');
+        S.isLive=true;log('Connected to live system via '+base);
+        await autoLoadStores();return true;
+      }
     }catch(e){}
   }
-  setConnStatus('error','Not connected');return false;
+  setConnStatus('error','Not connected');
+  return false;
 }
 async function reconnect(){
   setConnStatus('connecting','Connecting…');
@@ -2992,16 +3013,17 @@ async function testShopify() {
 }
 
 async function fetchShopify(query, vars = {}) {
-  if (!SHOPIFY.domain || !SHOPIFY.token) return null;
-  const res = await fetch(`https://${SHOPIFY.domain}/api/2024-01/graphql.json`, {
+  const domain = (SHOPIFY.domain || 'cchairandbeauty.com').replace(/^https?:\/\//, '').replace(/\/$/, '');
+  // Try with token if available, fall back to tokenless
+  const headers = { 'Content-Type': 'application/json' };
+  if (SHOPIFY.token) headers['X-Shopify-Storefront-Access-Token'] = SHOPIFY.token;
+  const res = await fetch(`https://${domain}/api/2026-01/graphql.json`, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Shopify-Storefront-Access-Token': SHOPIFY.token
-    },
+    headers,
     body: JSON.stringify({ query, variables: vars }),
-    signal: AbortSignal.timeout(8000)
+    signal: AbortSignal.timeout(10000)
   });
+  if (!res.ok) throw new Error(`Shopify ${res.status}`);
   return res.json();
 }
 
@@ -3010,32 +3032,19 @@ const shopifyImageCache = {};
 
 async function getShopifyImage(code, name) {
   if (shopifyImageCache[code] !== undefined) return shopifyImageCache[code];
-  if (!SHOPIFY.domain || !SHOPIFY.token) { shopifyImageCache[code] = null; return null; }
 
   try {
-    // Search by SKU (stock code) first, then by title
-    const q = `{
-      products(first: 1, query: "sku:${code}") {
-        edges { node {
-          title
-          featuredImage { url(transform: { maxWidth: 200, maxHeight: 200 }) }
-          variants(first: 1) { edges { node { sku } } }
-        }}
-      }
-    }`;
-    const data = await fetchShopify(q);
-    let img = data?.data?.products?.edges?.[0]?.node?.featuredImage?.url;
+    // Search by SKU first
+    const q1 = `{ products(first:1, query:"sku:${code}") { edges { node { featuredImage { url(transform:{maxWidth:200,maxHeight:200}) } } } } }`;
+    const d1 = await fetchShopify(q1);
+    let img = d1?.data?.products?.edges?.[0]?.node?.featuredImage?.url;
 
     if (!img) {
-      // Try by title keywords
-      const words = name.split(' ').slice(0, 3).join(' ');
-      const q2 = `{
-        products(first: 1, query: "title:${words}") {
-          edges { node { featuredImage { url(transform: { maxWidth: 200, maxHeight: 200 }) } } }
-        }
-      }`;
-      const data2 = await fetchShopify(q2);
-      img = data2?.data?.products?.edges?.[0]?.node?.featuredImage?.url;
+      // Try first 3 words of product name
+      const words = name.split(' ').slice(0,3).join(' ');
+      const q2 = `{ products(first:1, query:"title:${words}") { edges { node { featuredImage { url(transform:{maxWidth:200,maxHeight:200}) } } } } }`;
+      const d2 = await fetchShopify(q2);
+      img = d2?.data?.products?.edges?.[0]?.node?.featuredImage?.url;
     }
 
     shopifyImageCache[code] = img || null;
@@ -3394,8 +3403,10 @@ function openExcelTab() {
 
 async function init(){
   // Restore Shopify settings
-  if(SHOPIFY.domain)document.getElementById('shopify-domain').value=SHOPIFY.domain;
-  if(SHOPIFY.token)document.getElementById('shopify-token').value=SHOPIFY.token;
+  const sdEl=document.getElementById('shopify-domain');
+  if(sdEl)sdEl.value=SHOPIFY.domain||'cc-hair-beauty.myshopify.com';
+  const stEl=document.getElementById('shopify-token');
+  if(stEl&&SHOPIFY.token)stEl.value=SHOPIFY.token;
   document.getElementById('api-url-input').value=S.apiUrl;
   populateBrandFilter();populateCompareBrandFilter();
   if(S.stores.length){renderStorePills();renderDashboard();updateBadge();if(S.orderLines.length)renderOrders();renderStock();}
