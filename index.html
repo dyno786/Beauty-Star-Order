@@ -203,7 +203,7 @@ select{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/
     <div class="modal-sub">Connection and store configuration</div>
     <div id="settings-conn-status" style="padding:12px 14px;border-radius:var(--radius-sm);margin-bottom:16px;font-size:13px;display:flex;align-items:center;gap:10px"></div>
     <div class="form-group"><label class="form-label">Server Address</label>
-      <input type="text" id="api-url-input" placeholder="http://192.168.1.12:3001/stock">
+      <input type="text" id="api-url-input" placeholder="http://192.168.1.12:3002/stock">
       <div style="font-size:11px;color:var(--muted);margin-top:5px">From phone/Vercel use your PC network IP · Same PC use http://127.0.0.1:3001/stock</div>
     </div>
     <div class="form-group"><label class="form-label">Active Store</label>
@@ -953,7 +953,7 @@ select{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/
       <div class="card" style="max-width:560px">
         <div id="settings-inline-status" style="padding:12px 14px;border-radius:var(--radius-sm);margin-bottom:16px;font-size:13px;display:flex;align-items:center;gap:10px"></div>
         <div class="form-group"><label class="form-label">Server Address</label>
-          <input type="text" id="api-url-input2" placeholder="http://192.168.1.12:3001/stock">
+          <input type="text" id="api-url-input2" placeholder="http://192.168.1.12:3002/stock">
           <div style="font-size:11px;color:var(--muted);margin-top:5px;line-height:1.6">From phone/Vercel: use your PC's network IP (run <code style="background:var(--surface2);padding:1px 5px;border-radius:3px">ipconfig</code>)<br>Same PC: http://127.0.0.1:3001/stock</div>
         </div>
         <div class="form-group"><label class="form-label">Active Store</label>
@@ -5098,7 +5098,7 @@ const SUPPLIERS = {
 //  STATE
 // ══════════════════════════════════════════════════════
 const S = {
-  apiUrl: localStorage.getItem('bs_api') || 'http://192.168.1.12:3001/stock',
+  apiUrl: localStorage.getItem('bs_api') || 'http://192.168.1.12:3002/stock',
   activeStore: localStorage.getItem('bs_store') || '',
   stores: JSON.parse(localStorage.getItem('bs_stores') || '[]'),
   isLive: false,
@@ -5214,7 +5214,7 @@ function setConnStatus(state, label) {
 
 async function autoConnect() {
   setConnStatus('connecting', 'Connecting…');
-  const bases = [...new Set([S.apiUrl.replace('/stock',''), 'http://192.168.1.12:3001', 'http://127.0.0.1:3001'])];
+  const bases = [...new Set([S.apiUrl.replace('/stock',''), 'http://192.168.1.12:3002', 'http://127.0.0.1:3001'])];
   for(const base of bases) {
     try {
       const r = await fetch(base + '/health', { signal: AbortSignal.timeout(4000) });
@@ -6221,7 +6221,7 @@ function renderErrorLog() {
     // Patterns: "Sherry's: 1415 products for BR01 ROUNDHAY"
     //           "Beauty Star: 2099 products for BR01 ROUNDHAY"
     //           "Janson: 1510 products for BR01 ROUNDHAY"
-    //           "Connected: http://192.168.1.12:3001"
+    //           "Connected: http://192.168.1.12:3002"
     //           "Shopify error: ..."
     const stockM = msg.match(/^(.+?):\s+(\d+)\s+products for\s+(.+)$/);
     if(stockM) return { source: stockM[1], detail: `${parseInt(stockM[2]).toLocaleString()} products`, store: stockM[3] };
